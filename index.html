@@ -2928,54 +2928,170 @@
     });
 
     /* ── UCAPAN TAMU ─────────────────────────────── */
-    let ucapanList = [
-      { nama: 'Gigih dan Hilmy', pesan: 'Akhirnya cinta berlabuh pada pemuda kampung halaman 😍', waktu: '20 jam lalu', hadir: true },
-      { nama: 'Gigih dan Hilmy', pesan: 'Akhirnya cinta berlabuh pada pemuda kampung halaman 😍', waktu: '20 jam lalu', hadir: true },
-      { nama: 'Nina Tepen', pesan: 'KAAAANNN 😭😭 Congratulations cingtakuuu!! Lancar-lancar sampai hari H ya 🥹🤍', waktu: 'Selasa, 24 Maret 2026 pukul 20.52', hadir: true },
-      { nama: 'Samino Family', pesan: 'asyikk 😝😆', waktu: 'Minggu, 8 Maret 2026 pukul 20.30', hadir: true },
-      { nama: 'Samino Family', pesan: 'Yayyy', waktu: 'Minggu, 8 Maret 2026 pukul 20.28', hadir: true },
-    ];
+    /* ── UCAPAN TAMU ─────────────────────────────── */
+    /* ── SUPABASE CONFIG ─────────────────────────── */
+    const SB_URL = 'https://qrlympptmmfafwvdhhkt.supabase.co/rest/v1/log_ucapan';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFybHltcHB0bW1mYWZ3dmRoaGt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTI4MzUsImV4cCI6MjA5Mzg2ODgzNX0.9e5I4xjqw5C-SUKUXCDypdNnlxkSLTV33uS_8t_QPpQ';
+    const SB_HEADERS = {
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    };
 
+    let ucapanList = [];
     let ucapanIdx = 0;
     let ucapanAutoTimer;
 
-    function initUcapan() {
+    /* ── FORMAT WAKTU ────────────────────────────── */
+    function formatWaktu(iso) {
+      if (!iso) return 'Baru saja';
+      const d = new Date(iso);
+      const now = new Date();
+      const diff = Math.floor((now - d) / 1000);
+      if (diff < 60) return 'Baru saja';
+      if (diff < 3600) return Math.floor(diff/60) + ' menit lalu';
+      if (diff < 86400) return Math.floor(diff/3600) + ' jam lalu';
+      if (diff < 172800) return 'Kemarin';
+      return d.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    }
+
+    /* ── FETCH DATA DARI SUPABASE ────────────────── */
+    async function fetchUcapan() {
+      const wrap = document.querySelector('.ucapan-slider-wrap');
+      wrap.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gold);font-size:13px;letter-spacing:3px;opacity:0.6;">Memuat ucapan...</div>';
+      try {
+        const res = await fetch(SB_URL + '?order=inserted_at.desc&limit=50', {
+          method: 'GET',
+          mode: 'cors',
+          headers: { 
+            'apikey': SB_KEY, 
+            'Authorization': 'Bearer ' + SB_KEY,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        ucapanList = data.map(row => ({
+          nama: row.nama || 'Tamu',
+          pesan: row.isi_text || '',
+          waktu: formatWaktu(row.inserted_at),
+          hadir: true
+        }));
+        if (ucapanList.length === 0) {
+          ucapanList = [{ nama: '—', pesan: 'Belum ada ucapan. Jadilah yang pertama! 🌸', waktu: '', hadir: false }];
+        }
+      } catch(e) {
+        console.error('Supabase fetch error:', e);
+        // Fallback: tampilkan data hardcode sementara
+        ucapanList = [
+          { nama: 'Huda Nur Rayhan', pesan: 'MAKASIH ALLL', waktu: '9 Mei 2026', hadir: true },
+          { nama: 'Yoland', pesan: 'AAAAA', waktu: '9 Mei 2026', hadir: true },
+        ];
+      }
+      // Rebuild slider
+      wrap.innerHTML = '<div class="ucapan-track" id="ucapanTrack"></div>';
+      ucapanIdx = 0;
       renderUcapanCards();
       renderUcapanDots();
       setTimeout(() => {
         const firstCard = document.getElementById('ucard-0');
         if (firstCard) {
-          const h = firstCard.offsetHeight + 24; // tambah padding bawah
-          const wrap = document.querySelector('.ucapan-slider-wrap');
-          wrap.style.height = h + 'px';
+          wrap.style.height = (firstCard.offsetHeight + 24) + 'px';
           window._ucapanCardH = firstCard.offsetHeight;
         }
         updateUcapanSlider();
         startUcapanAuto();
-      }, 100);
+      }, 80);
     }
 
+    function initUcapan() {
+      fetchUcapan();
+      // Touch swipe
+      const wrap = document.querySelector('.ucapan-slider-wrap');
+      let startY = 0;
+      wrap.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+      wrap.addEventListener('touchend', e => {
+        const dy = startY - e.changedTouches[0].clientY;
+        if (Math.abs(dy) > 40) slideUcapan(dy > 0 ? 1 : -1);
+      });
+    }
+
+    /* ── KIRIM KE SUPABASE ───────────────────────── */
+    async function kirimUcapan() {
+      const nama = document.getElementById('ucapan-nama').value.trim();
+      const pesan = document.getElementById('ucapan-pesan').value.trim();
+      if (!nama || !pesan) {
+        document.getElementById('ucapan-nama').style.borderColor = 'var(--gold)';
+        return;
+      }
+      const btn = document.querySelector('.ucapan-submit');
+      btn.textContent = '⏳ Mengirim...';
+      btn.style.pointerEvents = 'none';
+      btn.style.opacity = '0.7';
+
+      try {
+        const res = await fetch(SB_URL, {
+          method: 'POST',
+          headers: SB_HEADERS,
+          body: JSON.stringify({ nama, isi_text: pesan })
+        });
+        if (!res.ok) throw new Error('Post error ' + res.status);
+        // Tambah ke list lokal langsung (optimistic)
+        ucapanList.unshift({ nama, pesan, waktu: 'Baru saja', hadir: true });
+        ucapanIdx = 0;
+        renderUcapanCards();
+        renderUcapanDots();
+        setTimeout(() => {
+          const firstCard = document.getElementById('ucard-0');
+          if (firstCard) {
+            document.querySelector('.ucapan-slider-wrap').style.height = (firstCard.offsetHeight + 24) + 'px';
+            window._ucapanCardH = firstCard.offsetHeight;
+          }
+          updateUcapanSlider();
+        }, 80);
+        // Reset form
+        document.getElementById('ucapan-nama').value = '';
+        document.getElementById('ucapan-pesan').value = '';
+        btn.textContent = '✓ Ucapan Terkirim';
+        btn.style.background = 'var(--brown)';
+        btn.style.opacity = '1';
+        setTimeout(() => {
+          btn.textContent = '✦ Kirim Ucapan ✦';
+          btn.style.background = '';
+          btn.style.pointerEvents = '';
+        }, 3000);
+      } catch(e) {
+        console.error('Supabase post error:', e);
+        btn.textContent = '✗ Gagal, coba lagi';
+        btn.style.background = '#8B2020';
+        btn.style.opacity = '1';
+        setTimeout(() => {
+          btn.textContent = '✦ Kirim Ucapan ✦';
+          btn.style.background = '';
+          btn.style.pointerEvents = '';
+        }, 3000);
+      }
+    }
+
+    /* ── SLIDER HELPERS ──────────────────────────── */
     function updateUcapanSlider() {
       const track = document.getElementById('ucapanTrack');
+      if (!track) return;
       const CARD_H = window._ucapanCardH || 160;
       const GAP = 16;
       track.style.transform = `translateY(-${ucapanIdx * (CARD_H + GAP)}px)`;
       track.style.gap = GAP + 'px';
-
-      document.querySelectorAll('.ucapan-dot').forEach((d, i) => {
-        d.classList.toggle('active', i === ucapanIdx);
-      });
-      document.getElementById('ucapanCounter').textContent = `${ucapanIdx + 1} / ${ucapanList.length}`;
+      document.querySelectorAll('.ucapan-dot').forEach((d, i) => d.classList.toggle('active', i === ucapanIdx));
+      const counter = document.getElementById('ucapanCounter');
+      if (counter) counter.textContent = `${ucapanIdx + 1} / ${ucapanList.length}`;
     }
 
-    function getInitial(nama) {
-      return nama.trim().charAt(0).toUpperCase();
-    }
-
-    function timeAgo(waktu) { return waktu; }
+    function getInitial(nama) { return nama.trim().charAt(0).toUpperCase(); }
 
     function renderUcapanCards() {
       const track = document.getElementById('ucapanTrack');
+      if (!track) return;
       track.innerHTML = ucapanList.map((u, i) => `
         <div class="ucapan-card" id="ucard-${i}">
           <div class="ucapan-card-top">
@@ -2986,13 +3102,14 @@
             </div>
           </div>
           <div class="ucapan-msg">"${u.pesan}"</div>
-          <div class="ucapan-time">${u.waktu}</div>
+          ${u.waktu ? `<div class="ucapan-time">${u.waktu}</div>` : ''}
         </div>
       `).join('');
     }
 
     function renderUcapanDots() {
       const dots = document.getElementById('ucapanDots');
+      if (!dots) return;
       dots.innerHTML = ucapanList.map((_, i) =>
         `<button class="ucapan-dot${i === 0 ? ' active' : ''}" onclick="goUcapan(${i})"></button>`
       ).join('');
@@ -3011,52 +3128,12 @@
     }
 
     function startUcapanAuto() {
-      ucapanAutoTimer = setInterval(() => slideUcapan(1), 4000);
+      ucapanAutoTimer = setInterval(() => slideUcapan(1), 4500);
     }
 
     function resetUcapanAuto() {
       clearInterval(ucapanAutoTimer);
       startUcapanAuto();
-    }
-
-    // Touch swipe support
-    (function () {
-      let startY = 0;
-      const wrap = document.querySelector('.ucapan-slider-wrap');
-      if (!wrap) return;
-      wrap.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
-      wrap.addEventListener('touchend', e => {
-        const dy = startY - e.changedTouches[0].clientY;
-        if (Math.abs(dy) > 40) slideUcapan(dy > 0 ? 1 : -1);
-      });
-    })();
-
-    function kirimUcapan() {
-      const nama = document.getElementById('ucapan-nama').value.trim();
-      const pesan = document.getElementById('ucapan-pesan').value.trim();
-      if (!nama || !pesan) {
-        document.getElementById('ucapan-nama').style.borderColor = 'var(--gold)';
-        return;
-      }
-      // Add to list
-      ucapanList.unshift({ nama, pesan, waktu: 'Baru saja', hadir: true });
-      ucapanIdx = 0;
-      renderUcapanCards();
-      renderUcapanDots();
-      updateUcapanSlider();
-      // Reset form
-      document.getElementById('ucapan-nama').value = '';
-      document.getElementById('ucapan-pesan').value = '';
-      // Feedback
-      const btn = document.querySelector('.ucapan-submit');
-      btn.textContent = '✓ Ucapan Terkirim';
-      btn.style.background = 'var(--brown)';
-      btn.style.pointerEvents = 'none';
-      setTimeout(() => {
-        btn.textContent = '✦ Kirim Ucapan ✦';
-        btn.style.background = '';
-        btn.style.pointerEvents = '';
-      }, 3000);
     }
 
     // Init after DOM ready
